@@ -596,14 +596,17 @@ def create_track_plot(data1: pd.DataFrame, data2: pd.DataFrame,
     
     # Add road surface if requested
     if road:
-        # Try to load track data first (for Hungary/Budapest)
+        # Try to load track data first (for Hungary/Budapest and Spa)
         track_data = None
         if race.lower() in ['hungary', 'hungarian', 'budapest']:
             track_data = load_track_data('Budapest')
+        elif race.lower() in ['spa', 'spa-francorchamps', 'belgium', 'belgian']:
+            track_data = load_track_data('Spa')
         
         if track_data is not None:
             # Use actual track data to create road
-            print("Using Budapest track data for road surface")
+            track_name = "Budapest" if race.lower() in ['hungary', 'hungarian', 'budapest'] else "Spa"
+            print(f"Using {track_name} track data for road surface")
             create_road_from_track_data(track_data, data1_track, data2_track, plt)
         else:
             # Fallback: Create thick grey road based on both driver's racing lines
@@ -847,14 +850,17 @@ def create_animated_track_plot(data1: pd.DataFrame, data2: pd.DataFrame,
     
     # Add road surface if requested
     if road:
-        # Try to load track data first (for Hungary/Budapest)
+        # Try to load track data first (for Hungary/Budapest and Spa)
         track_data = None
         if race.lower() in ['hungary', 'hungarian', 'budapest']:
             track_data = load_track_data('Budapest')
+        elif race.lower() in ['spa', 'spa-francorchamps', 'belgium', 'belgian']:
+            track_data = load_track_data('Spa')
         
         if track_data is not None:
             # Use actual track data to create road
-            print("Using Budapest track data for road surface")
+            track_name = "Budapest" if race.lower() in ['hungary', 'hungarian', 'budapest'] else "Spa"
+            print(f"Using {track_name} track data for road surface")
             create_road_from_track_data(track_data, data1_track, data2_track, ax)
             
             # Calculate proper car size based on F1 car width (2m) and track scaling
