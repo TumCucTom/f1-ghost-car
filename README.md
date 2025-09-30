@@ -1,4 +1,6 @@
-# F1 Ghost Car - Qualifying Positions Visualizer
+# F1 Qualifying Visual Overhead Comparisons
+
+![Follow Car Hungary](media/hungary_2024_follow.gif)
 
 A Python script that visualizes Formula 1 qualifying sessions with animated car tracking and realistic track layouts.
 
@@ -96,7 +98,7 @@ For other tracks, the script will fall back to creating a road surface from driv
 
 ## Troubleshooting
 
-- **No track data**: Script will use convex hull from driver paths
+- **No track data**: Script will use convex hull from driver paths (this doens't look great)
 - **Missing car images**: Script will use colored markers instead
 - **Poor alignment**: Check that track CSV matches the race location
 - **Slow loading**: First run downloads data, subsequent runs use cache
