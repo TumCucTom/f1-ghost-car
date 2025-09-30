@@ -157,3 +157,28 @@ python qualifying_positions.py --year 2024 --race "Hungary" --driver1 "NOR" --dr
 
 # Extract data and create fastest lap plot
 python qualifying_positions.py --year 2024 --race "Hungary" --driver1 "NOR" --driver2 "PIA" --export --plot
+
+## 🏎️ Animated Cars
+
+### **Real-time Car Animation**
+```bash
+python animated_cars.py --year 2024 --race "Hungary" --driver1 "NOR" --driver2 "PIA"
+```
+
+**Features:**
+- **Car Sprites**: Animated car assets instead of dots
+- **Trails**: Orange line for NOR, dark grey line for PIA
+- **Real-time**: Smooth 30 FPS animation
+- **Controls**: 
+  - `SPACE`: Pause/Resume
+  - `R`: Reset animation
+  - `ESC`: Exit
+
+**Customization:**
+```bash
+# Custom window size
+python animated_cars.py --year 2024 --race "Hungary" --width 1600 --height 900
+
+# Different drivers
+python animated_cars.py --year 2024 --race "Hungary" --driver1 "VER" --driver2 "HAM"
+```
