@@ -72,33 +72,9 @@ python qualifying_positions.py --year 2024 --race "Belgium" --driver1 "NOR" --dr
 python qualifying_positions.py --year 2024 --race "Spa" --driver1 "NOR" --driver2 "PIA" --animate --follow --road --no-lines
 ```
 
-## Supported Tracks
-
-Currently supports track data for:
-- **Hungary**: Use `Budapest.csv`
-- **Spa/Belgium**: Use `Spa.csv`
-
-For other tracks, the script will fall back to creating a road surface from driver racing lines.
-
 ## Output
 
 - **Static plots**: Displayed and saved as PNG
 - **Animations**: Saved as GIF files
 - **Filenames**: `{year}_{race}_{driver1}_vs_{driver2}_fastest_laps_animated.gif`
 
-## Features
-
-- **Realistic track layouts** using official track data
-- **Animated car tracking** with proper rotation
-- **Follow camera mode** for close-up racing action
-- **Realistic car sizing** based on actual F1 car dimensions (2m width)
-- **Customizable racing lines** (colored or hidden)
-- **Automatic alignment** of track data with driver telemetry
-- **High-quality rendering** with proper scaling and aspect ratios
-
-## Troubleshooting
-
-- **No track data**: Script will use convex hull from driver paths (this doens't look great)
-- **Missing car images**: Script will use colored markers instead
-- **Poor alignment**: Check that track CSV matches the race location
-- **Slow loading**: First run downloads data, subsequent runs use cache

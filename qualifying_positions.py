@@ -24,6 +24,141 @@ import matplotlib.animation as animation
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from PIL import Image
 
+# ---------------- Satellite mosaic helpers -----------------
+import math
+
+TILE_SIZE = 256
+SAT_ZOOM = 20  # must match the capture zoom used to build the mosaic
+SAT_SCALE = 2  # used for information only; world-pixel math is zoom-based
+
+SAT_ANCHOR_LAT = 47.578885  # start-line anchor used during mosaic build
+SAT_ANCHOR_LON = 19.248433
+
+METERS_PER_DEG_LAT = 111_320.0
+
+def meters_to_latlon(x_m: float, y_m: float, anchor_lat: float, anchor_lon: float) -> Tuple[float, float]:
+    lat = anchor_lat + (y_m / METERS_PER_DEG_LAT)
+    lon = anchor_lon + (x_m / (METERS_PER_DEG_LAT * math.cos(math.radians(anchor_lat))))
+    return lat, lon
+
+def latlon_to_meters(lat: float, lon: float, anchor_lat: float, anchor_lon: float) -> Tuple[float, float]:
+    dy = (lat - anchor_lat) * METERS_PER_DEG_LAT
+    dx = (lon - anchor_lon) * METERS_PER_DEG_LAT * math.cos(math.radians(anchor_lat))
+    return dx, dy
+
+def latlon_to_pixel(lat: float, lon: float, zoom: int) -> Tuple[float, float]:
+    siny = math.sin(math.radians(lat))
+    siny = min(max(siny, -0.9999), 0.9999)
+    world_size = TILE_SIZE * (1 << zoom)
+    x = (lon + 180.0) / 360.0 * world_size
+    y = (0.5 - math.log((1 + siny) / (1 - siny)) / (4 * math.pi)) * world_size
+    return x, y
+
+def pixel_to_latlon(x: float, y: float, zoom: int) -> Tuple[float, float]:
+    world_size = TILE_SIZE * (1 << zoom)
+    lon = x / world_size * 360.0 - 180.0
+    n = math.pi - 2.0 * math.pi * y / world_size
+    lat = math.degrees(math.atan(math.sinh(n)))
+    return lat, lon
+
+def compute_track_alignment_params(track_df: pd.DataFrame, data1_track: pd.DataFrame, data2_track: pd.DataFrame) -> Tuple[float, float, float]:
+    """Return (scale, tx, ty) mapping track CSV meters -> driver XY meters.
+
+    This mirrors the optimization used in create_road_from_track_data but returns the parameters
+    instead of drawing the road. We keep identical objective to ensure consistency.
+    """
+    from scipy.spatial.distance import cdist
+    from scipy.optimize import minimize
+
+    center_x = track_df['x_m'].values
+    center_y = track_df['y_m'].values
+
+    driver_x = np.concatenate([data1_track['X'].values, data2_track['X'].values])
+    driver_y = np.concatenate([data1_track['Y'].values, data2_track['Y'].values])
+
+    def alignment_error(params):
+        scale, tx, ty = params
+        scaled_center_x = center_x * scale + tx
+        scaled_center_y = center_y * scale + ty
+        track_points = np.column_stack([scaled_center_x, scaled_center_y])
+        driver_points = np.column_stack([driver_x, driver_y])
+        distances = cdist(driver_points, track_points)
+        min_distances = np.min(distances, axis=1)
+        penalty = np.sum(np.maximum(0, min_distances - 30))
+        return np.mean(min_distances) + penalty * 0.2
+
+    best_result = None
+    best_error = float('inf')
+    starting_points = [
+        [9.717, -1000, -272],
+        [8.875, 0, 0],
+        [10.0, -500, -100],
+        [9.0, -1500, -400],
+        [11.0, -800, -200],
+    ]
+    for start_point in starting_points:
+        try:
+            result = minimize(alignment_error, start_point,
+                              bounds=[(5.0, 15.0), (-2000, 2000), (-2000, 2000)],
+                              method='L-BFGS-B')
+            if result.fun < best_error:
+                best_result = result
+                best_error = result.fun
+        except Exception:
+            continue
+    if best_result is None:
+        best_result = minimize(alignment_error, [9.717, -1000, -272],
+                               bounds=[(5.0, 15.0), (-2000, 2000), (-2000, 2000)],
+                               method='L-BFGS-B')
+
+    scale, tx, ty = best_result.x
+    return float(scale), float(tx), float(ty)
+
+def compute_mosaic_extent_in_driver_xy(metadata_csv_path: str,
+                                       track_df: pd.DataFrame,
+                                       data1_track: pd.DataFrame,
+                                       data2_track: pd.DataFrame) -> Optional[Tuple[float, float, float, float]]:
+    """Compute imshow extent (xmin, xmax, ymin, ymax) in driver XY meters for the satellite mosaic.
+
+    - Reads min/max world-pixel bounds from metadata.csv
+    - Converts world-pixel corners -> lat/lon -> track meters (relative to anchor)
+    - Applies alignment (scale, tx, ty) to convert to driver XY
+    """
+    try:
+        import csv
+        rows = []
+        with open(metadata_csv_path, 'r') as f:
+            reader = csv.DictReader(f)
+            for r in reader:
+                rows.append(r)
+        if not rows:
+            return None
+        lefts = [float(r['left']) for r in rows]
+        rights = [float(r['right']) for r in rows]
+        tops = [float(r['top']) for r in rows]
+        bottoms = [float(r['bottom']) for r in rows]
+        min_left, max_right = min(lefts), max(rights)
+        min_top, max_bottom = min(tops), max(bottoms)
+
+        # Convert pixel corners to lat/lon
+        tl_lat, tl_lon = pixel_to_latlon(min_left, min_top, SAT_ZOOM)
+        br_lat, br_lon = pixel_to_latlon(max_right, max_bottom, SAT_ZOOM)
+
+        # Convert to track meters (relative to anchor used during capture)
+        tl_x, tl_y = latlon_to_meters(tl_lat, tl_lon, SAT_ANCHOR_LAT, SAT_ANCHOR_LON)
+        br_x, br_y = latlon_to_meters(br_lat, br_lon, SAT_ANCHOR_LAT, SAT_ANCHOR_LON)
+
+        # Alignment to driver XY
+        scale, tx, ty = compute_track_alignment_params(track_df, data1_track, data2_track)
+        xmin = tl_x * scale + tx
+        xmax = br_x * scale + tx
+        ymin = tl_y * scale + ty
+        ymax = br_y * scale + ty
+        return (xmin, xmax, ymin, ymax)
+    except Exception as e:
+        print(f"Failed to compute satellite extent: {e}")
+        return None
+
 
 def load_track_data(track_name: str) -> Optional[pd.DataFrame]:
     """Load track centerline and edge data from CSV file."""
@@ -772,7 +907,10 @@ def create_animated_track_plot(data1: pd.DataFrame, data2: pd.DataFrame,
                               follow: bool = False, window_size: float = 300.0,
                               gif_seconds: Optional[float] = None,
                               default_fps: int = 30, no_lines: bool = False, 
-                              road: bool = False) -> None:
+                              road: bool = False,
+                              satellite_bg: bool = False,
+                              satellite_path: str = "satellite_images/track_follow/track_follow_mosaic.png",
+                              satellite_metadata: str = "satellite_images/track_follow/metadata.csv") -> None:
     """
     Create an animated plot showing both drivers' fastest lap positions over time.
     
@@ -801,6 +939,19 @@ def create_animated_track_plot(data1: pd.DataFrame, data2: pd.DataFrame,
     
     # Create figure and axis
     fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Optional satellite background aligned to driver XY
+    if satellite_bg and os.path.exists(satellite_path) and os.path.exists(satellite_metadata):
+        try:
+            sat_img = Image.open(satellite_path)
+            track_df = pd.read_csv("track_data/Budapest.csv", comment='#', names=['x_m','y_m','w_tr_right_m','w_tr_left_m'])
+            extent = compute_mosaic_extent_in_driver_xy(satellite_metadata, track_df, data1_track, data2_track)
+            if extent is not None:
+                xmin, xmax, ymin, ymax = extent
+                ax.imshow(sat_img, extent=[xmin, xmax, ymax, ymin])  # invert y for image coordinates
+                print("Satellite background applied.")
+        except Exception as e:
+            print(f"Satellite background failed: {e}")
     
     # Plot track layout if available
     if session is not None:
@@ -1170,6 +1321,12 @@ Examples:
                         help='Make racing lines white instead of colored (hide lines but keep cars)')
     parser.add_argument('--road', action='store_true',
                         help='Add thick grey road surface based on driver racing lines')
+    parser.add_argument('--satellite-bg', action='store_true',
+                        help='Use satellite mosaic as background instead of road surface')
+    parser.add_argument('--satellite-image', type=str, default='satellite_images/track_follow/track_follow_mosaic.png',
+                        help='Path to satellite mosaic PNG')
+    parser.add_argument('--satellite-metadata', type=str, default='satellite_images/track_follow/metadata.csv',
+                        help='Path to satellite metadata CSV')
     
     args = parser.parse_args()
     
@@ -1220,7 +1377,10 @@ Examples:
                             driver1, driver2, args.year, args.race, session,
                             follow=args.follow, window_size=args.follow_window,
                             gif_seconds=args.gif_seconds, no_lines=args.no_lines,
-                            road=args.road
+                            road=args.road,
+                            satellite_bg=args.satellite_bg,
+                            satellite_path=args.satellite_image,
+                            satellite_metadata=args.satellite_metadata
                         )
                     else:
                         create_track_plot(fastest_lap_data1, fastest_lap_data2, driver1, driver2, args.year, args.race, session, road=args.road)
